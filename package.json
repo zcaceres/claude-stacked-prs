@@ -1,0 +1,19 @@
+{
+  "name": "claude-stacked-prs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Code customizations that push toward small stacked PRs: PostToolUse size-nudge hook, /checkpoint slash command, gt-aware /commit-push-pr",
+  "scripts": {
+    "install:user": "bun run install.ts",
+    "uninstall:user": "bun run install.ts --uninstall",
+    "hook": "bun run src/pr-size-nudge.ts"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.5.0"
+  }
+}
