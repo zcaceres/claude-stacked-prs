@@ -10,6 +10,18 @@ Claude Code customizations that make small stacked PRs the path of least resista
 - **Stacked-PR norm** (`claude-md/stacked-prs.md`) — short section installed into `~/.claude/CLAUDE.md` codifying the default behavior.
 - **Installer** (`install.ts`) — wires everything into `~/.claude/` via symlinks + a settings.json patch. Idempotent. `--uninstall` reverses it.
 
+## Why this exists
+
+I'm a Neanderthal who still wants to read the code I merge. But agent PRs are too big — they drive me crazy.
+
+With "accept all" and "auto mode," a single task touches dozens of files and edits hundreds or thousands of lines. It'll only get faster and more autonomous from here.
+
+I've found a way to help: a hook that nags Claude to commit once it has finished a logical unit of work. (I call the pattern an *AI behavioral nudge*.)
+
+Any time it changes a file, the hook reads the diff and says *"Hey Claude, you've edited X lines in Y files — sure it's not time for a commit?"* Left open-ended, Claude proposes a slice back to me: "I think we can ship {some change} as one unit."
+
+When I approve, a skill calls [Graphite](https://graphite.dev) to land it as a focused, stacked PR.
+
 ## Install
 
 ```bash

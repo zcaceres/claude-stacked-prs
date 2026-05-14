@@ -26,8 +26,6 @@ const PROJECT_DIR = import.meta.dir;
 const CLAUDE_DIR = join(HOME, ".claude");
 const COMMANDS_DIR = join(CLAUDE_DIR, "commands");
 const STATE_DIR = join(CLAUDE_DIR, "state");
-const SETTINGS_FILE = join(CLAUDE_DIR, "settings.json");
-const CLAUDE_MD_FILE = join(CLAUDE_DIR, "CLAUDE.md");
 
 const HOOK_SCRIPT = join(PROJECT_DIR, "src", "pr-size-nudge.ts");
 const HOOK_CMD = `bun run ${HOOK_SCRIPT}`;
@@ -130,16 +128,18 @@ async function installSymlinks(): Promise<string[]> {
   return out;
 }
 
-async function patchSettings(): Promise<string> {
-  await mkdir(CLAUDE_DIR, { recursive: true });
+export async function patchSettings(homeDir: string = HOME): Promise<string> {
+  const claudeDir = join(homeDir, ".claude");
+  const settingsFile = join(claudeDir, "settings.json");
+  await mkdir(claudeDir, { recursive: true });
 
   type Settings = z.infer<typeof SettingsSchema>;
   let parsed: Settings;
   let fileExisted = false;
 
-  if (await pathExists(SETTINGS_FILE)) {
+  if (await pathExists(settingsFile)) {
     fileExisted = true;
-    const raw = await readFile(SETTINGS_FILE, "utf-8");
+    const raw = await readFile(settingsFile, "utf-8");
     parsed = SettingsSchema.parse(JSON.parse(raw));
   } else {
     parsed = {};
@@ -161,12 +161,12 @@ async function patchSettings(): Promise<string> {
       entry.hooks.some((h) => h?.command === HOOK_CMD),
   );
   if (alreadyPresent) {
-    return `  = ${SETTINGS_FILE} hook entry already present`;
+    return `  = ${settingsFile} hook entry already present`;
   }
 
   let bak = "";
   if (fileExisted) {
-    bak = await backupFile(SETTINGS_FILE);
+    bak = await backupFile(settingsFile);
   }
 
   existingPost.push({
@@ -174,30 +174,32 @@ async function patchSettings(): Promise<string> {
     hooks: [{ type: "command", command: HOOK_CMD }],
   });
 
-  await writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
-  return `  + ${SETTINGS_FILE} hook entry added${bak ? ` (backup: ${bak})` : ""}`;
+  await writeFile(settingsFile, JSON.stringify(settings, null, 2) + "\n");
+  return `  + ${settingsFile} hook entry added${bak ? ` (backup: ${bak})` : ""}`;
 }
 
-async function wireClaudeMd(): Promise<string> {
-  await mkdir(CLAUDE_DIR, { recursive: true });
+export async function wireClaudeMd(homeDir: string = HOME): Promise<string> {
+  const claudeDir = join(homeDir, ".claude");
+  const claudeMdFile = join(claudeDir, "CLAUDE.md");
+  await mkdir(claudeDir, { recursive: true });
 
-  if (!(await pathExists(CLAUDE_MD_FILE))) {
-    await symlink(CANONICAL_CLAUDE_MD, CLAUDE_MD_FILE);
-    return `  + ${CLAUDE_MD_FILE} symlinked (was missing)`;
+  if (!(await pathExists(claudeMdFile))) {
+    await symlink(CANONICAL_CLAUDE_MD, claudeMdFile);
+    return `  + ${claudeMdFile} symlinked (was missing)`;
   }
 
-  if (await isSymlink(CLAUDE_MD_FILE)) {
-    if (await symlinkTargetIs(CLAUDE_MD_FILE, CANONICAL_CLAUDE_MD)) {
-      return `  = ${CLAUDE_MD_FILE} already symlinked correctly`;
+  if (await isSymlink(claudeMdFile)) {
+    if (await symlinkTargetIs(claudeMdFile, CANONICAL_CLAUDE_MD)) {
+      return `  = ${claudeMdFile} already symlinked correctly`;
     }
-    return `  - ${CLAUDE_MD_FILE} is a symlink to something else — leaving alone`;
+    return `  - ${claudeMdFile} is a symlink to something else — leaving alone`;
   }
 
-  const content = await readFile(CLAUDE_MD_FILE, "utf-8");
+  const content = await readFile(claudeMdFile, "utf-8");
   if (!content.trim()) {
-    await rm(CLAUDE_MD_FILE);
-    await symlink(CANONICAL_CLAUDE_MD, CLAUDE_MD_FILE);
-    return `  + ${CLAUDE_MD_FILE} symlinked (was empty regular file)`;
+    await rm(claudeMdFile);
+    await symlink(CANONICAL_CLAUDE_MD, claudeMdFile);
+    return `  + ${claudeMdFile} symlinked (was empty regular file)`;
   }
 
   const newSection = (await readFile(CANONICAL_CLAUDE_MD, "utf-8")).trim();
@@ -207,7 +209,7 @@ async function wireClaudeMd(): Promise<string> {
     "m",
   );
 
-  const bak = await backupFile(CLAUDE_MD_FILE);
+  const bak = await backupFile(claudeMdFile);
 
   let updated: string;
   let verb: string;
@@ -219,8 +221,8 @@ async function wireClaudeMd(): Promise<string> {
     updated = content + sep + fenced + "\n";
     verb = "appended";
   }
-  await writeFile(CLAUDE_MD_FILE, updated);
-  return `  + ${CLAUDE_MD_FILE} fenced section ${verb} (backup: ${bak})`;
+  await writeFile(claudeMdFile, updated);
+  return `  + ${claudeMdFile} fenced section ${verb} (backup: ${bak})`;
 }
 
 async function createStateDir(): Promise<string> {
@@ -251,16 +253,17 @@ async function uninstallSymlinks(): Promise<string[]> {
   return out;
 }
 
-async function uninstallSettings(): Promise<string> {
-  if (!(await pathExists(SETTINGS_FILE))) return `  - ${SETTINGS_FILE} doesn't exist`;
-  const raw = await readFile(SETTINGS_FILE, "utf-8");
+export async function uninstallSettings(homeDir: string = HOME): Promise<string> {
+  const settingsFile = join(homeDir, ".claude", "settings.json");
+  if (!(await pathExists(settingsFile))) return `  - ${settingsFile} doesn't exist`;
+  const raw = await readFile(settingsFile, "utf-8");
   const settings = SettingsSchema.parse(JSON.parse(raw)) as {
     hooks?: Record<string, unknown[]>;
   };
   const post = (settings.hooks?.["PostToolUse"] ?? []) as Array<{
     hooks?: Array<{ command?: string }>;
   }>;
-  if (post.length === 0) return `  - ${SETTINGS_FILE} has no PostToolUse hooks`;
+  if (post.length === 0) return `  - ${settingsFile} has no PostToolUse hooks`;
 
   const filtered = post.filter(
     (entry) =>
@@ -268,7 +271,7 @@ async function uninstallSettings(): Promise<string> {
       !entry.hooks.some((h) => h?.command === HOOK_CMD),
   );
   if (filtered.length === post.length) {
-    return `  - ${SETTINGS_FILE} has no entry for our hook`;
+    return `  - ${settingsFile} has no entry for our hook`;
   }
 
   if (filtered.length === 0) {
@@ -280,31 +283,32 @@ async function uninstallSettings(): Promise<string> {
     delete settings.hooks;
   }
 
-  const bak = await backupFile(SETTINGS_FILE);
-  await writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
-  return `  - removed hook entry from ${SETTINGS_FILE} (backup: ${bak})`;
+  const bak = await backupFile(settingsFile);
+  await writeFile(settingsFile, JSON.stringify(settings, null, 2) + "\n");
+  return `  - removed hook entry from ${settingsFile} (backup: ${bak})`;
 }
 
-async function uninstallClaudeMd(): Promise<string> {
-  if (!(await pathExists(CLAUDE_MD_FILE))) return `  - ${CLAUDE_MD_FILE} doesn't exist`;
+export async function uninstallClaudeMd(homeDir: string = HOME): Promise<string> {
+  const claudeMdFile = join(homeDir, ".claude", "CLAUDE.md");
+  if (!(await pathExists(claudeMdFile))) return `  - ${claudeMdFile} doesn't exist`;
 
-  if (await isSymlink(CLAUDE_MD_FILE)) {
-    if (await symlinkTargetIs(CLAUDE_MD_FILE, CANONICAL_CLAUDE_MD)) {
-      await rm(CLAUDE_MD_FILE);
-      return `  - removed symlink ${CLAUDE_MD_FILE}`;
+  if (await isSymlink(claudeMdFile)) {
+    if (await symlinkTargetIs(claudeMdFile, CANONICAL_CLAUDE_MD)) {
+      await rm(claudeMdFile);
+      return `  - removed symlink ${claudeMdFile}`;
     }
-    return `  ~ ${CLAUDE_MD_FILE} symlinked elsewhere — leaving alone`;
+    return `  ~ ${claudeMdFile} symlinked elsewhere — leaving alone`;
   }
 
-  const content = await readFile(CLAUDE_MD_FILE, "utf-8");
+  const content = await readFile(claudeMdFile, "utf-8");
   const fenceRe = new RegExp(`\\n*${FENCE_START}[\\s\\S]*?${FENCE_END}\\n*`, "m");
   if (!fenceRe.test(content)) {
-    return `  - ${CLAUDE_MD_FILE} has no fenced section to remove`;
+    return `  - ${claudeMdFile} has no fenced section to remove`;
   }
-  const bak = await backupFile(CLAUDE_MD_FILE);
+  const bak = await backupFile(claudeMdFile);
   const stripped = content.replace(fenceRe, "\n").trimEnd() + "\n";
-  await writeFile(CLAUDE_MD_FILE, stripped);
-  return `  - removed fenced section from ${CLAUDE_MD_FILE} (backup: ${bak})`;
+  await writeFile(claudeMdFile, stripped);
+  return `  - removed fenced section from ${claudeMdFile} (backup: ${bak})`;
 }
 
 // === entry ===
@@ -368,7 +372,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(`\nFailed: ${err instanceof Error ? err.message : String(err)}`);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(`\nFailed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  });
+}
