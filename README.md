@@ -1,6 +1,6 @@
 # claude-stacked-prs
 
-Claude Code customizations that make small stacked PRs the path of least resistance.
+Claude Code hook + skill that nudge Claude to make small stacked PRs.
 
 ## What's in here
 
@@ -12,15 +12,15 @@ Claude Code customizations that make small stacked PRs the path of least resista
 
 ## Why this exists
 
-I'm a Neanderthal who still wants to read the code I merge. But agent PRs are too big — they drive me crazy.
+Agent PRs are too big.
 
-With "accept all" and "auto mode," a single task touches dozens of files and edits hundreds or thousands of lines. It'll only get faster and more autonomous from here.
+With "accept all" and "auto mode," a single task touches dozens of files and edits hundreds or thousands of lines.
 
-I've found a way to help: a hook that nags Claude to commit once it has finished a logical unit of work. (I call the pattern an *AI behavioral nudge*.)
+This hook nags Claude to commit once it has finished a logical unit of work. (I call the pattern an *AI behavioral nudge*.)
 
 Any time it changes a file, the hook reads the diff and says *"Hey Claude, you've edited X lines in Y files — sure it's not time for a commit?"* Left open-ended, Claude proposes a slice back to me: "I think we can ship {some change} as one unit."
 
-When I approve, a skill calls [Graphite](https://graphite.dev) to land it as a focused, stacked PR.
+When approved, a skill calls [Graphite](https://graphite.dev) to land it as a focused, stacked PR.
 
 ## Install
 
