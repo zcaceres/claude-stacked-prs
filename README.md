@@ -1,6 +1,6 @@
 # claude-stacked-prs
 
-Claude Code customizations that make small stacked PRs the path of least resistance.
+Claude Code hook + skill that nudge Claude to make small stacked PRs.
 
 ## What's in here
 
@@ -9,6 +9,18 @@ Claude Code customizations that make small stacked PRs the path of least resista
 - **`/commit-push-pr` slash command** (`commands/commit-push-pr.md`) — Graphite-aware version of the existing command; falls back to plain `git push` + `gh pr create` in non-Graphite repos.
 - **Stacked-PR norm** (`claude-md/stacked-prs.md`) — short section installed into `~/.claude/CLAUDE.md` codifying the default behavior.
 - **Installer** (`install.ts`) — wires everything into `~/.claude/` via symlinks + a settings.json patch. Idempotent. `--uninstall` reverses it.
+
+## Why this exists
+
+Agent PRs are too big.
+
+With "accept all" and "auto mode," a single task touches dozens of files and edits hundreds or thousands of lines.
+
+This hook nags Claude to commit once it has finished a logical unit of work. (I call the pattern an *AI behavioral nudge*.)
+
+Any time it changes a file, the hook reads the diff and says *"Hey Claude, you've edited X lines in Y files — sure it's not time for a commit?"* Left open-ended, Claude proposes a slice back to me: "I think we can ship {some change} as one unit."
+
+When approved, a skill calls [Graphite](https://graphite.dev) to land it as a focused, stacked PR.
 
 ## Install
 
