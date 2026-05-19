@@ -1,10 +1,10 @@
 # Commit, Push, and PR
 
-Commit only the changes made in this conversation, push them, and open a PR if one doesn't exist. Graphite-aware: stacks update through `gt stack submit` when the repo is `gt`-initialized.
+Commit only the changes made in this conversation, push them, and open a PR if one doesn't exist. Graphite-aware: stacks update through `gt stack submit` when the repo is `gt`-initialized. Stack-aware in plain `gh` mode: preserves the existing base branch.
 
 **Usage:** `/commit-push-pr [base-branch]`
 
-**Base branch:** $ARGUMENTS (default: `main`, fallback to `master`) — only used in the non-Graphite fallback path.
+**Base branch:** $ARGUMENTS (default: `main`, fallback to `master`) — only used in the non-Graphite path when creating a **new** PR with no existing base.
 
 > If you have uncommitted work that represents the *next* slice in a stack (not the current branch's PR), use `/checkpoint` instead — it creates a new stacked branch rather than amending the current PR.
 
@@ -53,7 +53,7 @@ EOF
 Decide which path to take:
 
 ```bash
-test -f "$(git rev-parse --show-toplevel)/.graphite_repo_config" && which gt
+which gt 2>/dev/null && test -f "$(git rev-parse --show-toplevel)/.graphite_repo_config" 2>/dev/null
 ```
 
 **If both succeed → Graphite path:**
@@ -64,22 +64,32 @@ gt stack submit
 
 This force-pushes the current branch (and any ancestors in the stack) and creates/updates a GitHub PR for each branch with the correct base. Idempotent.
 
-**Otherwise → plain git + gh fallback:**
+**Otherwise → plain `gh` + `git` path:**
 
 ```bash
 git push -u origin HEAD
 ```
 
-If the branch doesn't have an upstream, this sets it.
-
 Then check for an existing PR:
 ```bash
-gh pr list --head $(git branch --show-current) --state open
+gh pr list --head "$(git branch --show-current)" --state open --json number,baseRefName,url -q '.[0]'
 ```
 
-If no PR exists, create one:
+**If a PR already exists:** report its URL. Do not change the base branch.
+
+**If no PR exists**, determine the correct base:
+
+1. If `$ARGUMENTS` was provided, use that as the base.
+2. Otherwise, check if this branch was created off another non-main branch (i.e. part of a stack):
+   ```bash
+   git log --oneline --decorate main..HEAD
+   ```
+   If the branch clearly descends from another feature branch, ask the user which base to target.
+3. Default to `main` (fallback `master`).
+
+Create the PR:
 ```bash
-gh pr create --title "<title>" --body "$(cat <<'EOF'
+gh pr create --base "<base>" --title "<title>" --body "$(cat <<'EOF'
 ## Summary
 
 - <bullet points of changes>
@@ -91,12 +101,11 @@ EOF
 )"
 ```
 
-If a PR already exists, just report its URL.
-
 ## Important
 
 - NEVER commit files you didn't modify in this conversation
 - NEVER use `git add .` or stage unrelated changes
 - If unsure which files you changed, ASK the user
 - Report the PR URL when done
-- If `gt stack submit` fails because the branch isn't tracked by Graphite, run `gt branch track` then retry once before falling back to the plain-git path
+- **Graphite path:** If `gt stack submit` fails because the branch isn't tracked, run `gt branch track` then retry once before falling back to the plain-git path
+- **`gh` path:** When a PR already exists, do not change its base branch — it may be part of a stack

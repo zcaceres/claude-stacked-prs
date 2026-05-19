@@ -1,6 +1,8 @@
 # Checkpoint — Ship Current Slice as a Stacked PR
 
-Commit the current uncommitted work as the next branch in a Graphite stack, push it, and open a PR against the parent branch. Leave the user on the new child branch, ready to keep working.
+Commit the current uncommitted work as the next branch in a stack, push it, and open a PR against the parent branch. Leave the user on the new child branch, ready to keep working.
+
+Uses Graphite (`gt`) when available, otherwise falls back to `gh` CLI + `git`.
 
 **Usage:** `/checkpoint [slice description]`
 
@@ -25,20 +27,14 @@ git diff --stat HEAD
 
 Show the user the stat. Do **NOT** adjudicate coherence yourself. Only pause to ask the user about slicing if the diff touches **more than 6 distinct top-level directories** — that's a cheap signal that multiple concerns are mixed.
 
-### 3. Verify Graphite Setup
-
-Both must hold:
+### 3. Detect Stack Tooling
 
 ```bash
-which gt
-test -f "$(git rev-parse --show-toplevel)/.graphite_repo_config"
+which gt 2>/dev/null && test -f "$(git rev-parse --show-toplevel)/.graphite_repo_config" 2>/dev/null
 ```
 
-If either check fails, **stop** and tell the user:
-
-> Graphite isn't set up in this repo. Run `gt repo init` here (interactive — pick the trunk branch). Then re-run `/checkpoint`. Falling back to `/commit-push-pr` for now.
-
-Then invoke `/commit-push-pr` and exit. **Never** auto-run `gt repo init` — it's interactive.
+If both succeed → **Graphite path** (step 4A).
+Otherwise → **`gh` fallback path** (step 4B).
 
 ### 4. Pre-flight: Check for Remote Drift
 
@@ -46,7 +42,7 @@ Then invoke `/commit-push-pr` and exit. **Never** auto-run `gt repo init` — it
 git fetch
 ```
 
-If anyone else may have pushed to the current branch, resolve first. `gt stack submit` force-pushes the stack; you don't want to clobber another commit.
+If anyone else may have pushed to the current branch, resolve first.
 
 ### 5. Stage Only Your Changes
 
@@ -56,7 +52,7 @@ Stage explicitly — never `git add .` / `git add -A`:
 git add <file1> <file2> ...
 ```
 
-### 6. Create the Stacked Branch + Commit
+### 6A. Graphite Path — Create Branch + Submit
 
 ```bash
 gt branch create -am "<commit message>"
@@ -66,7 +62,7 @@ gt branch create -am "<commit message>"
 
 If `$ARGUMENTS` is empty, generate a concise conventional-commit-style message from the diff (e.g. `feat: add user repository`, `fix: handle null token in middleware`).
 
-### 7. Submit the Stack
+Then submit the stack:
 
 ```bash
 gt stack submit
@@ -74,7 +70,49 @@ gt stack submit
 
 This pushes (force-with-lease internally) and creates/updates one GitHub PR per branch in the stack, with the correct base branches.
 
-### 8. Report
+### 6B. `gh` Fallback Path — Create Branch + PR
+
+Record the current branch as the parent:
+
+```bash
+PARENT_BRANCH=$(git branch --show-current)
+```
+
+Generate a branch name from the commit message or `$ARGUMENTS` (slugified, e.g. `feat/add-user-repository`). Create and switch to the new branch:
+
+```bash
+git checkout -b <new-branch-name>
+```
+
+Commit:
+
+```bash
+git commit -m "$(cat <<'EOF'
+<commit message>
+EOF
+)"
+```
+
+Push and create a PR targeting the parent branch (not main):
+
+```bash
+git push -u origin HEAD
+gh pr create --base "$PARENT_BRANCH" --title "<title>" --body "$(cat <<'EOF'
+## Summary
+
+- <bullet points>
+
+## Test plan
+
+- <how to verify>
+
+---
+Stack: this PR targets `<PARENT_BRANCH>`, not `main`. Merge bottom-up.
+EOF
+)"
+```
+
+### 7. Report
 
 Report:
 - The new PR URL (parse from `gt stack submit` output, or `gh pr view --json url --jq .url`).
@@ -86,5 +124,6 @@ Report:
 - NEVER commit files you didn't modify in this conversation.
 - NEVER use `git add .` or stage unrelated changes.
 - NEVER auto-run `gt repo init` or `gt auth` — both are interactive and must come from the user.
-- If `gt stack submit` fails because the branch isn't tracked, run `gt branch track` then retry once before falling back to `/commit-push-pr`.
+- **Graphite path:** If `gt stack submit` fails because the branch isn't tracked, run `gt branch track` then retry once before falling back to the `gh` path.
+- **`gh` path:** Always set `--base` to the parent branch, not `main`, to preserve the stack chain.
 - Report the PR URL when done.
