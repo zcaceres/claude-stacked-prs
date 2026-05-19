@@ -127,3 +127,29 @@ Report:
 - **Graphite path:** If `gt stack submit` fails because the branch isn't tracked, run `gt branch track` then retry once before falling back to the `gh` path.
 - **`gh` path:** Always set `--base` to the parent branch, not `main`, to preserve the stack chain.
 - Report the PR URL when done.
+
+## Merging a Stack (gh path)
+
+**Never squash-merge stacked PRs.** Squash-merging rewrites commit SHAs — child branches still reference the original commits, so Git treats them as unmerged. This causes child PRs to be auto-closed or stranded with stale bases.
+
+**Correct approach — regular merge, bottom-up:**
+
+```bash
+# Merge base PR (no --squash)
+gh pr merge <base-pr> --merge --delete-branch
+
+# Wait for GitHub to retarget the next PR
+# Verify before proceeding:
+gh pr view <next-pr> --json baseRefName --jq .baseRefName
+# Should show "main" (or the new base). If not, retarget manually:
+gh pr edit <next-pr> --base main
+
+# Then merge the next PR
+gh pr merge <next-pr> --merge --delete-branch
+# Repeat up the stack
+```
+
+**Key rules:**
+- Use `--merge`, not `--squash`, so child branches recognize their parent commits as merged.
+- Verify each child's base has retargeted before merging the next — GitHub retargeting is async.
+- Never tight-loop merges with `sleep` — poll `baseRefName` to confirm.
