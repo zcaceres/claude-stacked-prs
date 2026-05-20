@@ -1,10 +1,10 @@
 # Commit, Push, and PR
 
-Commit only the changes made in this conversation, push them, and open a PR if one doesn't exist. Graphite-aware: stacks update through `gt stack submit` when the repo is `gt`-initialized. Stack-aware in plain `gh` mode: preserves the existing base branch.
+Commit only the changes made in this conversation, push them, and open a PR if one doesn't exist. Stack-aware: uses `git stack submit` when on a stacked branch, otherwise uses `gh` directly. Preserves the existing base branch.
 
 **Usage:** `/commit-push-pr [base-branch]`
 
-**Base branch:** $ARGUMENTS (default: `main`, fallback to `master`) — only used in the non-Graphite path when creating a **new** PR with no existing base.
+**Base branch:** $ARGUMENTS (default: `main`, fallback to `master`) — only used in the plain `gh` path when creating a **new** PR with no existing base.
 
 > If you have uncommitted work that represents the *next* slice in a stack (not the current branch's PR), use `/checkpoint` instead — it creates a new stacked branch rather than amending the current PR.
 
@@ -48,21 +48,21 @@ EOF
 )"
 ```
 
-### 5. Push and Open PR — Graphite-Aware
+### 5. Push and Open PR — Stack-Aware
 
 Decide which path to take:
 
 ```bash
-which gt 2>/dev/null && test -f "$(git rev-parse --show-toplevel)/.graphite_repo_config" 2>/dev/null
+git stack --version 2>/dev/null && git config "branch.$(git branch --show-current).stack-parent" 2>/dev/null
 ```
 
-**If both succeed → Graphite path:**
+**If both succeed (git-stack installed AND current branch is stacked):**
 
 ```bash
-gt stack submit
+git stack submit
 ```
 
-This force-pushes the current branch (and any ancestors in the stack) and creates/updates a GitHub PR for each branch with the correct base. Idempotent.
+This pushes all branches in the stack (force-with-lease) and creates/updates a GitHub PR for each branch with the correct base. Idempotent.
 
 **Otherwise → plain `gh` + `git` path:**
 
@@ -107,5 +107,4 @@ EOF
 - NEVER use `git add .` or stage unrelated changes
 - If unsure which files you changed, ASK the user
 - Report the PR URL when done
-- **Graphite path:** If `gt stack submit` fails because the branch isn't tracked, run `gt branch track` then retry once before falling back to the plain-git path
 - **`gh` path:** When a PR already exists, do not change its base branch — it may be part of a stack

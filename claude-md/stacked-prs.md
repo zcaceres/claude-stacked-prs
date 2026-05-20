@@ -10,22 +10,22 @@ main ← feature-a ← feature-b ← feature-c
 
 Each PR targets the branch below it, not main.
 
-### Graphite (preferred when available)
+### `git stack` (primary)
+
+Lightweight stack management using `git` + `gh`. No third-party services or extra auth.
 
 **Key commands:**
-- `gt branch create` — create a new branch on top of the current one, recording the parent relationship
-- `gt modify` — amend the current branch; Graphite knows to rebase everything above it
-- `gt restack` — after changing a mid-stack branch, rebase all descendant branches so they stay coherent
-- `gt stack submit` — push the entire stack and create/update PRs on GitHub, each targeting its parent branch (not main)
-- `gt sync` — pull latest from trunk and clean up merged branches
+- `git stack create <name> [-m "message"]` — create a new branch on top of the current one, recording the parent relationship in git config
+- `git stack log` — visualize the current stack with PR status
+- `git stack submit` — push all branches in the stack and create/update PRs on GitHub, each targeting its parent branch
 
-**Merge cascading:** When the bottom PR merges into main, Graphite automatically retargets the next PR to main and rebases it. This cascades up the stack — no manual re-pointing needed.
+**How it works:** Parent relationships are stored in `git config branch.<name>.stack-parent`. The `gh-merge-base` config key is also set so `gh pr create` auto-picks the correct base.
 
-**Important:** `gt stack submit` force-pushes (with lease) internally. If someone else pushed to a stacked branch outside Graphite, fetch and reconcile first.
+**Important:** `git stack submit` uses `--force-with-lease` when pushing. If someone else pushed to a stacked branch, fetch and reconcile first.
 
 ### Plain `gh` + `git` (fallback)
 
-When Graphite isn't installed or initialized, use `gh` CLI + `git` directly.
+When `git stack` isn't installed, use `gh` CLI + `git` directly.
 
 **Creating a stacked branch:**
 ```bash
@@ -36,31 +36,78 @@ gh pr create --base feature/layer-1 --title "Layer 2: ..."
 
 **Merging a stack (bottom-up, one at a time):**
 
-Merge each PR from the bottom of the stack upward. After each merge:
+Three merge strategies exist. Each has different implications for stacked PRs:
+
+| Strategy | Flag | SHAs preserved? | Child branches break? | Rebase needed? |
+|----------|------|------------------|-----------------------|----------------|
+| Merge commit | `--merge` | Yes | No | No |
+| Rebase merge | `--rebase` | No (rewritten) | Yes | Yes |
+| Squash merge | `--squash` | No (single new) | Yes | Yes |
+
+#### Option A: Merge commit (simplest, recommended for stacks)
 
 ```bash
-# 1. Merge the bottom PR
-gh pr merge <PR-NUMBER> --squash --delete-branch
+# For each PR, bottom to top:
+gh pr merge <PR> --merge --delete-branch
 
-# 2. Retarget the next PR to main
-gh pr edit <NEXT-PR-NUMBER> --base main
+# Verify child retargeted (GitHub does this async):
+gh pr view <NEXT-PR> --json baseRefName -q '.baseRefName'
+# Must print "main" before continuing. If not:
+gh pr edit <NEXT-PR> --base main
 
-# 3. Verify retarget completed (GitHub does this async)
-gh pr view <NEXT-PR-NUMBER> --json baseRefName -q '.baseRefName'
-#    must print "main" before continuing
-
-# 4. Rebase onto updated main and force-push
-git fetch origin
-git checkout feature/layer-2
-git rebase origin/main
-git push --force-with-lease
-
-# 5. Wait for CI, then repeat from step 1 for the next PR
+# Repeat for next PR
 ```
 
-**Critical: do not tight-loop merges.** GitHub's branch retarget after `--delete-branch` is async. Always verify the child PR's base with `gh pr view` before merging the next one.
+Child branches recognize parent commits as already merged — no rebasing needed.
 
-**Squash-merge changes commit hashes.** Downstream branches still reference old commits — you must rebase each layer onto the new `main` tip or you get phantom conflicts.
+#### Option B: Rebase merge (preserves individual commits, linear history)
+
+**Do NOT use `--delete-branch`.** Deleting the base branch auto-closes child PRs, and GitHub won't let you reopen a PR whose base branch no longer exists.
+
+For each PR, bottom to top:
+
+```bash
+# 1. Retarget to main
+gh pr edit <PR> --base main
+
+# 2. Rebase ONLY this PR's unique commit(s) onto main.
+#    <parent-commit> = the tip of the branch below this one (before rebase).
+#    This drops already-merged ancestor commits with old SHAs.
+git fetch origin main
+git rebase --onto origin/main <parent-commit> origin/<branch>
+
+# 3. Force-push the rebased branch
+git push --force-with-lease origin HEAD:refs/heads/<branch>
+
+# 4. Merge (no --delete-branch!)
+gh pr merge <PR> --rebase
+
+# 5. Fetch updated main, repeat for next PR
+git fetch origin main
+```
+
+**Finding `<parent-commit>`:** Each stacked branch has N ancestor commits + 1 unique commit. The parent commit is `origin/<branch>~1` when the PR has a single commit (the common case with `/checkpoint`). For multi-commit PRs, it's the last commit that belongs to the parent PR.
+
+**Tip:** Before starting, map the stack: for each branch, record its tip SHA and its parent SHA. These are the original SHAs before any rebasing — use them throughout.
+
+#### Option C: Squash merge
+
+Same workflow as rebase merge (Option B) — squash also rewrites SHAs. The same `--delete-branch` warning and rebase-onto-main requirements apply.
+
+#### Recovery: child PR auto-closed by deleted base branch
+
+If `--delete-branch` was used and a child PR got closed:
+```bash
+# Recreate the deleted base branch pointing at current main
+git push origin origin/main:refs/heads/<deleted-base-branch>
+# Reopen the child PR
+gh pr reopen <PR>
+# Retarget to main
+gh pr edit <PR> --base main
+# Delete the temporary branch
+git push origin --delete <deleted-base-branch>
+# Then rebase the child branch onto main and force-push (Option B step 2-3)
+```
 
 **Useful verification commands:**
 ```bash
@@ -70,6 +117,11 @@ gh pr view <NUMBER> --json baseRefName -q '.baseRefName'
 # List your open PRs with their bases
 gh pr list --author @me --json number,title,baseRefName,state \
   -q '.[] | "\(.number) \(.baseRefName) \(.state) \(.title)"'
+
+# Map a stack — shows each branch's tip and parent commit
+for branch in <branch1> <branch2> ...; do
+  echo "$branch: $(git log --oneline -1 origin/$branch) parent:$(git rev-parse --short origin/$branch~1)"
+done
 ```
 
 ### Norms
@@ -78,7 +130,7 @@ gh pr list --author @me --json number,title,baseRefName,state \
 - When starting non-trivial work, propose the stack upfront: list the 2–5 slices you plan to ship and confirm before implementing.
 - At each logical seam, run `/checkpoint` to ship the current slice as a stacked PR and continue on a fresh child branch.
 - The PostToolUse hook will nudge when an uncommitted diff grows past ~300 lines / 8 files — treat that as a prompt to reflect, not a hard rule.
-- Use Graphite (`gt`) when available. Otherwise use `gh` CLI + `git` for stack management. Standard GitHub PRs are the review surface — reviewers need nothing installed.
-- When merging a stack without Graphite, merge bottom-up and verify each child PR's base retargeted before merging the next.
+- Use `git stack` when available. Otherwise use `gh` CLI + `git` for stack management. Standard GitHub PRs are the review surface — reviewers need nothing installed.
+- When merging a stack, merge bottom-up and verify each child PR's base retargeted before merging the next.
 - Keep stacks shallow — 3–4 PRs max before rebase cascades get painful.
 - When asking a teammate to review a stack, link the top PR and say "stacked — review bottom-up."
