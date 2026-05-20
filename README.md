@@ -1,13 +1,14 @@
 # claude-stacked-prs
 
-Claude Code hook + skill that nudge Claude to make small stacked PRs.
+Claude Code hooks, commands, and a lightweight stack manager that nudge Claude toward small, focused stacked PRs.
 
 ## What's in here
 
+- **`git stack`** (`bin/git-stack`) — lightweight stacked-PR manager built on `gh` + `git`. Creates branches, tracks parent relationships, pushes + opens PRs, and merges stacks bottom-up. No third-party services or extra auth.
 - **PostToolUse hook** (`src/pr-size-nudge.ts`) — nudges Claude toward `/checkpoint` when the uncommitted diff in the current repo grows past a threshold.
-- **`/checkpoint` slash command** (`commands/checkpoint.md`) — ships the current slice as a stacked PR and leaves you on a fresh child branch ready to keep working. Uses Graphite (`gt`) when available, otherwise falls back to `gh` CLI + `git`.
-- **`/commit-push-pr` slash command** (`commands/commit-push-pr.md`) — commit, push, and open a PR. Graphite-aware; falls back to stack-aware `gh pr create` (preserves base branch) in non-Graphite repos.
-- **Stacked-PR norm** (`claude-md/stacked-prs.md`) — short section installed into `~/.claude/CLAUDE.md` codifying the default behavior.
+- **`/checkpoint` slash command** (`commands/checkpoint.md`) — ships the current slice as a stacked PR and leaves you on a fresh child branch ready to keep working. Uses `git stack` when available, otherwise falls back to `gh` CLI + `git`.
+- **`/commit-push-pr` slash command** (`commands/commit-push-pr.md`) — commit, push, and open a PR. Stack-aware: uses `git stack submit` on stacked branches, otherwise falls back to `gh pr create` (preserves base branch).
+- **Stacked-PR norm** (`claude-md/stacked-prs.md`) — section installed into `~/.claude/CLAUDE.md` codifying the default behavior.
 - **Installer** (`install.ts`) — wires everything into `~/.claude/` via symlinks + a settings.json patch. Idempotent. `--uninstall` reverses it.
 
 ## Why this exists
@@ -20,7 +21,7 @@ This hook nags Claude to commit once it has finished a logical unit of work. (I 
 
 Any time it changes a file, the hook reads the diff and says *"Hey Claude, you've edited X lines in Y files — sure it's not time for a commit?"* Left open-ended, Claude proposes a slice back to me: "I think we can ship {some change} as one unit."
 
-When approved, a skill calls [Graphite](https://graphite.dev) to land it as a focused, stacked PR.
+When approved, `/checkpoint` calls `git stack` to land it as a focused, stacked PR.
 
 ## Install
 
@@ -33,61 +34,42 @@ bun run install.ts
 The installer:
 
 1. Verifies `bun`, `git`, `gh` are on PATH.
-2. Symlinks `commands/*.md` into `~/.claude/commands/` (backing up any existing files as `.bak.<timestamp>`).
-3. Adds a PostToolUse hook entry to `~/.claude/settings.json` (backed up first). Idempotent.
-4. Either symlinks an empty `~/.claude/CLAUDE.md` to `claude-md/stacked-prs.md`, or appends the content between fence markers if `CLAUDE.md` already has content.
-5. Creates `~/.claude/state/` for the hook's dedup state.
-6. Prints next steps for Graphite setup.
+2. Symlinks `commands/*.md` into `~/.claude/commands/`.
+3. Installs `git stack` to `~/.local/bin/git-stack` (symlink).
+4. Adds a PostToolUse hook entry to `~/.claude/settings.json`. Idempotent.
+5. Either symlinks an empty `~/.claude/CLAUDE.md` to `claude-md/stacked-prs.md`, or appends the content between fence markers if `CLAUDE.md` already has content.
+6. Creates `~/.claude/state/` for the hook's dedup state.
 
-## Stack tooling setup (after install)
+Existing files are backed up as `.bak.<timestamp>` before being overwritten.
 
-### Option A: Graphite (recommended)
-
-Graphite automates rebasing, retargeting, and merge cascading across the stack.
+## `git stack` commands
 
 ```bash
-# Once per machine
-brew install withgraphite/tap/graphite
-gt auth                                # opens browser
-
-# Once per repo where you want stacking
-cd /path/to/your/repo
-gt repo init
+git stack create [<name>] [-m "message"]    # Create a stacked branch
+git stack log                               # Visualize the current stack with PR status
+git stack submit                            # Push all branches + create/update PRs
+git stack merge [--all] [--rebase|--squash] [--dry-run]  # Merge PRs bottom-up
 ```
 
-`gt auth` and `gt repo init` are both interactive and must be run by you (not the agent).
+Parent relationships are stored in `git config branch.<name>.stack-parent`. No external services, no auth beyond `gh auth login`.
 
-### Option B: `gh` CLI (fallback — no extra setup)
+### Merging a stack
 
-If Graphite isn't installed or initialized in a repo, `/checkpoint` and `/commit-push-pr` fall back to plain `gh` + `git`. This requires only:
+`git stack merge` merges the bottom-most open PR. Add `--all` to merge the entire stack bottom-up. Each child PR is explicitly retargeted to `main` before the next merge — no reliance on GitHub's async retarget behavior.
 
-```bash
-# gh should already be installed (checked by the installer)
-gh auth login                          # once per machine, if not already authed
-```
+Three strategies are supported:
 
-No per-repo setup needed. The commands will create branches targeting parent branches and use `gh pr create --base <parent>` to form the stack.
+| Strategy | Flag | Best for |
+|----------|------|----------|
+| Merge commit | `--merge` (default) | Stacks — preserves SHAs, no child rebasing needed |
+| Rebase | `--rebase` | Linear history — rewrites SHAs, children rebased automatically |
+| Squash | `--squash` | Single-commit PRs — same tradeoffs as rebase |
 
-**Merging a `gh`-based stack** is manual and must go bottom-up:
+**Important:** Never use `gh pr merge --delete-branch` with stacked PRs. GitHub's auto-retarget is a repo setting, not guaranteed. Deleting a base branch can auto-close child PRs irrecoverably.
 
-```bash
-# 1. Merge the bottom PR
-gh pr merge <PR-1> --squash
+### Fallback: plain `gh` + `git`
 
-# 2. Retarget the next PR to main
-gh pr edit <PR-2> --base main
-
-# 3. Verify retarget completed (this is async!)
-gh pr view <PR-2> --json baseRefName -q '.baseRefName'
-
-# 4. Rebase onto updated main
-git fetch origin && git checkout <branch-2> && git rebase origin/main
-git push --force-with-lease
-
-# 5. Repeat for each remaining PR in the stack
-```
-
-**Important:** Never use `--delete-branch` — GitHub's auto-retarget is a repo setting, not guaranteed. Deleting a base branch can auto-close child PRs irrecoverably. Always explicitly retarget and verify the child PR's base before merging the next one.
+If `git stack` isn't installed, `/checkpoint` and `/commit-push-pr` fall back to `gh` + `git` directly. This requires only `gh auth login`. Merging is manual — see `claude-md/stacked-prs.md` for the full guide.
 
 ## Hook configuration (env vars)
 
@@ -109,12 +91,10 @@ bun.lock:package-lock.json:pnpm-lock.yaml:yarn.lock:Cargo.lock:go.sum:Gemfile.lo
 1. You're working in some repo. The hook is silent until the uncommitted diff grows past the thresholds.
 2. Past the threshold, on the next Edit/Write, Claude sees a system-reminder: "Uncommitted diff is X lines across Y files — consider `/checkpoint`."
 3. You type `/checkpoint <slice description>`. Claude reviews the diff, stages files, and ships the slice:
-   - **With Graphite:** `gt branch create -am "..."` + `gt stack submit` (pushes + opens the PR with the right base branch).
-   - **Without Graphite:** `git checkout -b <branch>` + `git push` + `gh pr create --base <parent-branch>`.
+   - **With `git stack`:** `git stack create -m "..."` + `git stack submit` (pushes + opens the PR with the correct base branch).
+   - **Without `git stack`:** `git checkout -b <branch>` + `git push` + `gh pr create --base <parent-branch>`.
 4. You're now on the fresh child branch. Keep working. Next checkpoint stacks again.
-5. When the bottom PR merges:
-   - **Graphite:** `gt sync` + `gt restack` reparents the rest of the stack automatically.
-   - **`gh`:** Manually retarget the next PR (`gh pr edit --base main`), verify, rebase, and merge bottom-up.
+5. When you're ready to merge: `git stack merge --all` merges the entire stack bottom-up, retargeting each child PR automatically.
 
 ## Uninstall
 
@@ -128,11 +108,13 @@ Removes symlinks, restores `~/.claude/settings.json` and `~/.claude/CLAUDE.md` f
 
 ```
 ~/claude-stacked-prs/
+├── bin/
+│   └── git-stack                    # git stack CLI (pure bash)
 ├── src/
-│   └── pr-size-nudge.ts            # PostToolUse hook
+│   └── pr-size-nudge.ts             # PostToolUse hook
 ├── commands/
-│   ├── checkpoint.md               # /checkpoint slash command
-│   └── commit-push-pr.md           # gt-aware /commit-push-pr
+│   ├── checkpoint.md                # /checkpoint slash command
+│   └── commit-push-pr.md           # /commit-push-pr slash command
 ├── claude-md/
 │   └── stacked-prs.md              # CLAUDE.md "Stacked PRs" norm
 ├── install.ts                       # installer
