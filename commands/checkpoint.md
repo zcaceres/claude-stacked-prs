@@ -130,11 +130,12 @@ Report:
 
 See the full merge guide in the **Stacked PRs** CLAUDE.md section. Summary of the three strategies:
 
-- **`--merge` (recommended):** Preserves SHAs. Child branches just work. Use `--delete-branch` freely.
-- **`--rebase`:** Rewrites SHAs. Must rebase each child onto main before merging. **Never use `--delete-branch`** — it auto-closes child PRs and they can't be reopened.
+- **`--merge` (recommended):** Preserves SHAs. Child branches just work.
+- **`--rebase`:** Rewrites SHAs. Must rebase each child onto main before merging.
 - **`--squash`:** Same problems as rebase. Avoid for stacks.
 
 **Key rules:**
 - Merge bottom-up, one PR at a time.
+- **Never use `--delete-branch`** — GitHub's auto-retarget is a repo setting, not guaranteed. Deleting a base branch can auto-close child PRs irrecoverably.
 - Verify each child's `baseRefName` is `main` before merging the next.
-- With `--rebase`/`--squash`: retarget to main → `git rebase --onto origin/main <parent-commit> origin/<branch>` → force-push → merge. No `--delete-branch`.
+- With `--rebase`/`--squash`: retarget to main → `git rebase --onto origin/main <parent-commit> origin/<branch>` → force-push → merge.

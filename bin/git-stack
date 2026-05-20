@@ -470,22 +470,7 @@ cmd_merge() {
 
     if [[ "$strategy" == "merge" ]]; then
       info "merging #${pr_num} (${BOLD}$branch${RESET}) with merge commit..."
-      gh pr merge "$pr_num" --merge --delete-branch 2>/dev/null || die "failed to merge PR #$pr_num"
-
-      if [[ -n "$child_pr" ]]; then
-        info "waiting for #${child_pr} to retarget to ${trunk}..."
-        if wait_for_retarget "$child_pr" "$trunk"; then
-          info "#${child_pr} retargeted to ${trunk} ✓"
-        else
-          warn "retarget timed out — forcing retarget..."
-          gh pr edit "$child_pr" --base "$trunk" 2>/dev/null || die "failed to retarget PR #$child_pr to $trunk"
-          info "#${child_pr} retargeted to ${trunk} (forced) ✓"
-        fi
-      fi
-
-      if [[ -n "$child_branch" ]]; then
-        set_stack_parent "$child_branch" "$trunk"
-      fi
+      gh pr merge "$pr_num" --merge 2>/dev/null || die "failed to merge PR #$pr_num"
     else
       # Rebase or squash strategy
       # Look up the ORIGINAL tip from pre-loop snapshot (not current, which may have been rewritten)
@@ -507,32 +492,31 @@ cmd_merge() {
       local strategy_flag="--$strategy"
       info "merging #${pr_num} (${BOLD}$branch${RESET}) with ${strategy}..."
       gh pr merge "$pr_num" "$strategy_flag" 2>/dev/null || die "failed to merge PR #$pr_num"
+    fi
 
-      if [[ -n "$child_branch" ]]; then
-        info "updating child ${BOLD}$child_branch${RESET}..."
-        set_stack_parent "$child_branch" "$trunk"
+    # Retarget child PR to trunk (don't rely on GitHub auto-retarget)
+    if [[ -n "$child_pr" ]]; then
+      info "retargeting #${child_pr} to ${trunk}..."
+      # Give GitHub a moment, then force retarget
+      sleep 2
+      gh pr edit "$child_pr" --base "$trunk" 2>/dev/null || die "failed to retarget PR #$child_pr to $trunk"
+      info "#${child_pr} retargeted to ${trunk} ✓"
+    fi
 
+    if [[ -n "$child_branch" ]]; then
+      set_stack_parent "$child_branch" "$trunk"
+
+      # For rebase/squash: child needs rebasing onto new trunk
+      if [[ "$strategy" != "merge" ]]; then
         git fetch origin "$trunk" 2>/dev/null
         git checkout "$child_branch" 2>/dev/null || die "failed to checkout $child_branch"
         git rebase --onto "origin/$trunk" "$parent_tip" "$child_branch" 2>/dev/null || die "rebase conflict on $child_branch — resolve manually"
         git push --force-with-lease origin "$child_branch" 2>/dev/null || die "failed to push rebased $child_branch"
-
-        if [[ -n "$child_pr" ]]; then
-          gh pr edit "$child_pr" --base "$trunk" 2>/dev/null || die "failed to retarget PR #$child_pr to $trunk"
-          info "#${child_pr} retargeted to ${trunk} ✓"
-        fi
       fi
-
-      # Clean up remote branch (rebase/squash don't use --delete-branch)
-      git push origin --delete "$branch" 2>/dev/null || true
     fi
 
-    # Clean up local branch — checkout trunk first if we're on the branch being deleted
+    # Clean up local metadata only (branches left for user to delete)
     unset_stack_parent "$branch"
-    if [[ "$(git symbolic-ref --short HEAD 2>/dev/null)" == "$branch" ]]; then
-      git checkout "$trunk" 2>/dev/null || true
-    fi
-    git branch -D "$branch" 2>/dev/null || true
 
     merged=$((merged + 1))
   done
