@@ -527,8 +527,11 @@ cmd_merge() {
       git push origin --delete "$branch" 2>/dev/null || true
     fi
 
-    # Clean up local branch
+    # Clean up local branch — checkout trunk first if we're on the branch being deleted
     unset_stack_parent "$branch"
+    if [[ "$(git symbolic-ref --short HEAD 2>/dev/null)" == "$branch" ]]; then
+      git checkout "$trunk" 2>/dev/null || true
+    fi
     git branch -D "$branch" 2>/dev/null || true
 
     merged=$((merged + 1))
