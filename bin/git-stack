@@ -332,6 +332,199 @@ cmd_submit() {
   printf "\n${GREEN}✓${RESET} stack submitted (%d branches pushed)\n" $((stack_count - 1))
 }
 
+# --- Retarget polling ---
+
+wait_for_retarget() {
+  local pr_number="$1" expected_base="$2" max_attempts="${3:-4}"
+  local attempt=0 delay=2
+
+  while [[ $attempt -lt $max_attempts ]]; do
+    local actual_base
+    actual_base=$(gh pr view "$pr_number" --json baseRefName --jq .baseRefName 2>/dev/null || true)
+    if [[ "$actual_base" == "$expected_base" ]]; then
+      return 0
+    fi
+    sleep "$delay"
+    delay=$((delay * 2))
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
+# --- Merge ---
+
+cmd_merge() {
+  require_git_repo
+
+  local strategy="merge" merge_all=false dry_run=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --merge)   strategy="merge"; shift ;;
+      --rebase)  strategy="rebase"; shift ;;
+      --squash)  strategy="squash"; shift ;;
+      --all)     merge_all=true; shift ;;
+      --dry-run) dry_run=true; shift ;;
+      -h|--help) echo "Usage: $PROG merge [--all] [--rebase|--squash] [--dry-run]"; exit 0 ;;
+      *)         die "unknown flag: $1" ;;
+    esac
+  done
+
+  command -v gh >/dev/null 2>&1 || die "'gh' CLI not found"
+
+  local trunk
+  trunk=$(trunk_branch)
+
+  # Build stack from root to current branch
+  local stack_lines
+  stack_lines=$(stack_to_current)
+  local stack_count
+  stack_count=$(echo "$stack_lines" | grep -c . || true)
+
+  if [[ "$stack_count" -le 1 ]]; then
+    die "no stack to merge — current branch has no stack-parent"
+  fi
+
+  # Get open PRs
+  local pr_json
+  pr_json=$(gh pr list --state open --json number,headRefName,baseRefName --limit 50 2>/dev/null) || die "failed to query PRs — check 'gh auth status'"
+
+  # Build ordered list of branches to merge (skip trunk)
+  local branches_to_merge=""
+  echo "$stack_lines" | tail -n +2 | while IFS= read -r branch; do
+    [[ -z "$branch" ]] && continue
+    local pr_entry
+    pr_entry=$(echo "$pr_json" | grep -o "{[^}]*\"headRefName\":\"$branch\"[^}]*}" 2>/dev/null | head -1 || true)
+    if [[ -n "$pr_entry" ]]; then
+      local pr_num
+      pr_num=$(echo "$pr_entry" | sed -n 's/.*"number":\([0-9]*\).*/\1/p' | head -1)
+      echo "$branch:$pr_num"
+    fi
+  done > /tmp/git-stack-merge-$$
+
+  local merge_list
+  merge_list=$(cat /tmp/git-stack-merge-$$ 2>/dev/null || true)
+  rm -f /tmp/git-stack-merge-$$
+
+  if [[ -z "$merge_list" ]]; then
+    die "no open PRs found in the stack"
+  fi
+
+  if [[ "$merge_all" != true ]]; then
+    merge_list=$(echo "$merge_list" | head -1)
+  fi
+
+  local merge_count
+  merge_count=$(echo "$merge_list" | grep -c . || true)
+
+  # Dry run
+  if [[ "$dry_run" == true ]]; then
+    printf "${BOLD}Dry run${RESET} — would merge %d PR(s) using %s strategy:\n\n" "$merge_count" "$strategy"
+    echo "$merge_list" | while IFS=: read -r branch pr_num; do
+      info "#${pr_num} (${branch}) — $strategy"
+    done
+    return 0
+  fi
+
+  local original_branch
+  original_branch=$(current_branch)
+
+  # Merge each PR bottom-up
+  local merged=0
+  local remaining_list="$merge_list"
+
+  echo "$merge_list" | while IFS=: read -r branch pr_num; do
+    [[ -z "$branch" ]] && continue
+
+    # Find child PR (the next line in remaining_list, or check for children)
+    local child_branch="" child_pr=""
+    local next_in_stack
+    next_in_stack=$(echo "$remaining_list" | grep -A1 "^$branch:" | tail -1)
+    if [[ "$next_in_stack" != "$branch:$pr_num" && -n "$next_in_stack" ]]; then
+      child_branch=$(echo "$next_in_stack" | cut -d: -f1)
+      child_pr=$(echo "$next_in_stack" | cut -d: -f2)
+    else
+      # Check if there's a child PR not in merge list
+      local child_b
+      child_b=$(find_children "$branch" | head -1)
+      if [[ -n "$child_b" ]]; then
+        local child_entry
+        child_entry=$(echo "$pr_json" | grep -o "{[^}]*\"headRefName\":\"$child_b\"[^}]*}" 2>/dev/null | head -1 || true)
+        if [[ -n "$child_entry" ]]; then
+          child_branch="$child_b"
+          child_pr=$(echo "$child_entry" | sed -n 's/.*"number":\([0-9]*\).*/\1/p' | head -1)
+        fi
+      fi
+    fi
+
+    if [[ "$strategy" == "merge" ]]; then
+      info "merging #${pr_num} (${BOLD}$branch${RESET}) with merge commit..."
+      gh pr merge "$pr_num" --merge --delete-branch 2>/dev/null || die "failed to merge PR #$pr_num"
+
+      if [[ -n "$child_pr" ]]; then
+        info "waiting for #${child_pr} to retarget to ${trunk}..."
+        if wait_for_retarget "$child_pr" "$trunk"; then
+          info "#${child_pr} retargeted to ${trunk} ✓"
+        else
+          warn "retarget timed out — forcing retarget..."
+          gh pr edit "$child_pr" --base "$trunk" 2>/dev/null || die "failed to retarget PR #$child_pr to $trunk"
+          info "#${child_pr} retargeted to ${trunk} (forced) ✓"
+        fi
+      fi
+    else
+      # Rebase or squash strategy
+      info "retargeting #${pr_num} to ${trunk}..."
+      gh pr edit "$pr_num" --base "$trunk" 2>/dev/null || die "failed to retarget PR #$pr_num to $trunk"
+
+      info "rebasing ${BOLD}$branch${RESET} onto ${trunk}..."
+      git fetch origin "$trunk" 2>/dev/null || die "failed to fetch $trunk"
+      git checkout "$branch" 2>/dev/null || die "failed to checkout $branch"
+      git rebase "origin/$trunk" 2>/dev/null || die "rebase conflict — resolve manually, then re-run merge"
+      git push --force-with-lease origin "$branch" 2>/dev/null || die "failed to push rebased $branch"
+
+      local strategy_flag="--$strategy"
+      info "merging #${pr_num} (${BOLD}$branch${RESET}) with ${strategy}..."
+      gh pr merge "$pr_num" "$strategy_flag" 2>/dev/null || die "failed to merge PR #$pr_num"
+
+      if [[ -n "$child_branch" ]]; then
+        info "updating child ${BOLD}$child_branch${RESET}..."
+        set_stack_parent "$child_branch" "$trunk"
+
+        git fetch origin "$trunk" 2>/dev/null
+        git checkout "$child_branch" 2>/dev/null || die "failed to checkout $child_branch"
+        git rebase "origin/$trunk" 2>/dev/null || die "rebase conflict on $child_branch — resolve manually"
+        git push --force-with-lease origin "$child_branch" 2>/dev/null || die "failed to push rebased $child_branch"
+
+        if [[ -n "$child_pr" ]]; then
+          gh pr edit "$child_pr" --base "$trunk" 2>/dev/null || die "failed to retarget PR #$child_pr to $trunk"
+          info "#${child_pr} retargeted to ${trunk} ✓"
+        fi
+      fi
+
+      # Clean up remote branch (rebase/squash don't use --delete-branch)
+      git push origin --delete "$branch" 2>/dev/null || true
+    fi
+
+    # Clean up local branch
+    unset_stack_parent "$branch"
+    git branch -D "$branch" 2>/dev/null || true
+
+    merged=$((merged + 1))
+  done
+
+  # Sync local state
+  git fetch --prune 2>/dev/null || true
+
+  # Return to a sensible branch
+  if git show-ref --verify --quiet "refs/heads/$original_branch" 2>/dev/null; then
+    git checkout "$original_branch" 2>/dev/null || true
+  else
+    git checkout "$trunk" 2>/dev/null || true
+  fi
+
+  printf "\n${GREEN}✓${RESET} merged %d PR(s) using %s strategy\n" "$merge_count" "$strategy"
+}
+
 # --- Usage ---
 
 usage() {
@@ -339,11 +532,12 @@ usage() {
 ${BOLD}$PROG${RESET} v$VERSION — lightweight stacked PRs with git + gh
 
 ${BOLD}Usage:${RESET}
-  $PROG create [<branch-name>] [-m "message"]   Create a stacked branch
-  $PROG log                                      Show the current stack
-  $PROG submit                                   Push & create/update PRs
-  $PROG help                                     Show this help
-  $PROG --version                                Show version
+  $PROG create [<branch-name>] [-m "message"]          Create a stacked branch
+  $PROG log                                             Show the current stack
+  $PROG submit                                          Push & create/update PRs
+  $PROG merge [--all] [--rebase|--squash] [--dry-run]   Merge PRs bottom-up
+  $PROG help                                             Show this help
+  $PROG --version                                        Show version
 
 ${BOLD}Metadata:${RESET}
   Stack parent is stored in git config (branch.<name>.stack-parent).
@@ -358,6 +552,7 @@ case "${1:-}" in
   create)    shift; cmd_create "$@" ;;
   log|ls)    shift; cmd_log "$@" ;;
   submit|push) shift; cmd_submit "$@" ;;
+  merge)     shift; cmd_merge "$@" ;;
   -h|--help|help|"") usage ;;
   -v|--version) echo "$PROG v$VERSION" ;;
   *)         die "unknown command: $1 — run '$PROG help' for usage" ;;
