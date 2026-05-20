@@ -510,7 +510,22 @@ cmd_merge() {
       info "rebasing ${BOLD}$branch${RESET} onto ${trunk}..."
       git fetch origin "$trunk" 2>/dev/null || die "failed to fetch $trunk"
       git checkout "$branch" 2>/dev/null || die "failed to checkout $branch"
-      git rebase "origin/$trunk" 2>/dev/null || die "rebase conflict — resolve manually, then re-run merge"
+
+      # Use --onto with the previous branch's original tip to replay ONLY this
+      # branch's unique commits (avoids replaying already-merged parent commits)
+      local prev_in_list
+      prev_in_list=$(echo "$merge_list" | grep -B1 "^${branch}:" | head -1 | cut -d: -f1)
+      if [[ "$prev_in_list" != "$branch" && -n "$prev_in_list" ]]; then
+        local onto_boundary
+        onto_boundary=$(echo "$tip_snapshot" | grep "^${prev_in_list}:" | head -1 | cut -d: -f2)
+        if [[ -n "$onto_boundary" && "$onto_boundary" != "unknown" ]]; then
+          git rebase --onto "origin/$trunk" "$onto_boundary" "$branch" 2>/dev/null || die "rebase conflict — resolve manually, then re-run merge"
+        else
+          git rebase "origin/$trunk" 2>/dev/null || die "rebase conflict — resolve manually, then re-run merge"
+        fi
+      else
+        git rebase "origin/$trunk" 2>/dev/null || die "rebase conflict — resolve manually, then re-run merge"
+      fi
       git push --force-with-lease origin "$branch" 2>/dev/null || die "failed to push rebased $branch"
 
       local strategy_flag="--$strategy"
