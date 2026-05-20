@@ -72,7 +72,7 @@ No per-repo setup needed. The commands will create branches targeting parent bra
 
 ```bash
 # 1. Merge the bottom PR
-gh pr merge <PR-1> --squash --delete-branch
+gh pr merge <PR-1> --squash
 
 # 2. Retarget the next PR to main
 gh pr edit <PR-2> --base main
@@ -87,7 +87,7 @@ git push --force-with-lease
 # 5. Repeat for each remaining PR in the stack
 ```
 
-**Important:** Don't tight-loop merges — GitHub retargets asynchronously after branch deletion. Always verify the child PR's base before merging the next one.
+**Important:** Never use `--delete-branch` — GitHub's auto-retarget is a repo setting, not guaranteed. Deleting a base branch can auto-close child PRs irrecoverably. Always explicitly retarget and verify the child PR's base before merging the next one.
 
 ## Hook configuration (env vars)
 

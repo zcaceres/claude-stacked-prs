@@ -530,10 +530,15 @@ cmd_merge() {
     if [[ -n "$child_branch" ]]; then
       set_stack_parent "$child_branch" "$trunk"
 
-      # For rebase/squash: restack child and all its descendants
+      # For rebase/squash: restack child and all its descendants,
+      # but skip if child is in the merge list (the loop handles it)
       if [[ "$strategy" != "merge" ]]; then
-        git fetch origin "$trunk" 2>/dev/null
-        restack_onto "$child_branch" "$parent_tip" "origin/$trunk"
+        if echo "$merge_list" | grep -q "^${child_branch}:"; then
+          : # child will be rebased by the next loop iteration
+        else
+          git fetch origin "$trunk" 2>/dev/null
+          restack_onto "$child_branch" "$parent_tip" "origin/$trunk"
+        fi
       fi
     fi
 

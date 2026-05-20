@@ -49,15 +49,19 @@ Three merge strategies exist. Each has different implications for stacked PRs:
 
 ```bash
 # For each PR, bottom to top:
-gh pr merge <PR> --merge --delete-branch
+gh pr merge <PR> --merge
 
-# Verify child retargeted (GitHub does this async):
-gh pr view <NEXT-PR> --json baseRefName -q '.baseRefName'
-# Must print "main" before continuing. If not:
+# Retarget child PR to main (don't rely on GitHub auto-retarget — it's a repo setting):
 gh pr edit <NEXT-PR> --base main
+
+# Verify retarget:
+gh pr view <NEXT-PR> --json baseRefName -q '.baseRefName'
+# Must print "main" before continuing.
 
 # Repeat for next PR
 ```
+
+**Do NOT use `--delete-branch`** — GitHub's auto-retarget is a repo setting, not default. Deleting the base branch can auto-close child PRs irrecoverably.
 
 Child branches recognize parent commits as already merged — no rebasing needed.
 
