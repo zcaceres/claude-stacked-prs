@@ -429,6 +429,17 @@ cmd_merge() {
   local original_branch
   original_branch=$(current_branch)
 
+  # Snapshot original branch tips before any rewrites (needed for --onto rebase boundaries)
+  local tip_snapshot=""
+  echo "$merge_list" | while IFS=: read -r b _; do
+    [[ -z "$b" ]] && continue
+    local sha
+    sha=$(git rev-parse "$b" 2>/dev/null || echo "unknown")
+    echo "$b:$sha"
+  done > /tmp/git-stack-tips-$$
+  tip_snapshot=$(cat /tmp/git-stack-tips-$$ 2>/dev/null || true)
+  rm -f /tmp/git-stack-tips-$$
+
   # Merge each PR bottom-up
   local merged=0
   local remaining_list="$merge_list"
@@ -477,9 +488,12 @@ cmd_merge() {
       fi
     else
       # Rebase or squash strategy
-      # Capture the parent branch tip before merging — needed for --onto rebase of children
+      # Look up the ORIGINAL tip from pre-loop snapshot (not current, which may have been rewritten)
       local parent_tip
-      parent_tip=$(git rev-parse "$branch" 2>/dev/null) || die "failed to resolve tip of $branch"
+      parent_tip=$(echo "$tip_snapshot" | grep "^$branch:" | head -1 | cut -d: -f2)
+      if [[ -z "$parent_tip" || "$parent_tip" == "unknown" ]]; then
+        parent_tip=$(git rev-parse "$branch" 2>/dev/null) || die "failed to resolve tip of $branch"
+      fi
 
       info "retargeting #${pr_num} to ${trunk}..."
       gh pr edit "$pr_num" --base "$trunk" 2>/dev/null || die "failed to retarget PR #$pr_num to $trunk"
