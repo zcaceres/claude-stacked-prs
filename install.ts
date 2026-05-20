@@ -31,6 +31,9 @@ const HOOK_SCRIPT = join(PROJECT_DIR, "src", "pr-size-nudge.ts");
 const HOOK_CMD = `bun run ${HOOK_SCRIPT}`;
 const HOOK_MATCHER = "Edit|Write|MultiEdit|NotebookEdit";
 
+const GIT_STACK_SOURCE = join(PROJECT_DIR, "bin", "git-stack");
+const GIT_STACK_TARGET = join(HOME, ".local", "bin", "git-stack");
+
 const CANONICAL_CLAUDE_MD = join(PROJECT_DIR, "claude-md", "stacked-prs.md");
 const COMMAND_SOURCES: Array<{ from: string; to: string }> = [
   {
@@ -124,6 +127,35 @@ async function installSymlinks(): Promise<string[]> {
       await symlink(from, to);
       out.push(`  + ${to} symlinked`);
     }
+  }
+  return out;
+}
+
+async function installGitStack(): Promise<string[]> {
+  const targetDir = join(HOME, ".local", "bin");
+  await mkdir(targetDir, { recursive: true });
+  const out: string[] = [];
+
+  if (await isSymlink(GIT_STACK_TARGET)) {
+    if (await symlinkTargetIs(GIT_STACK_TARGET, GIT_STACK_SOURCE)) {
+      out.push(`  = ${GIT_STACK_TARGET} already correct`);
+    } else {
+      await rm(GIT_STACK_TARGET);
+      await symlink(GIT_STACK_SOURCE, GIT_STACK_TARGET);
+      out.push(`  ~ ${GIT_STACK_TARGET} symlink retargeted`);
+    }
+  } else if (await pathExists(GIT_STACK_TARGET)) {
+    const bak = await backupFile(GIT_STACK_TARGET);
+    await symlink(GIT_STACK_SOURCE, GIT_STACK_TARGET);
+    out.push(`  + ${GIT_STACK_TARGET} symlinked (existing backed up to ${bak})`);
+  } else {
+    await symlink(GIT_STACK_SOURCE, GIT_STACK_TARGET);
+    out.push(`  + ${GIT_STACK_TARGET} symlinked`);
+  }
+
+  const pathEnv = process.env.PATH ?? "";
+  if (!pathEnv.split(":").includes(targetDir)) {
+    out.push(`  ⚠ ${targetDir} is not on PATH — add it to your shell profile`);
   }
   return out;
 }
@@ -253,6 +285,20 @@ async function uninstallSymlinks(): Promise<string[]> {
   return out;
 }
 
+async function uninstallGitStack(): Promise<string> {
+  if (!(await pathExists(GIT_STACK_TARGET))) {
+    return `  - ${GIT_STACK_TARGET} not present`;
+  }
+  if (await isSymlink(GIT_STACK_TARGET)) {
+    if (await symlinkTargetIs(GIT_STACK_TARGET, GIT_STACK_SOURCE)) {
+      await rm(GIT_STACK_TARGET);
+      return `  - removed ${GIT_STACK_TARGET}`;
+    }
+    return `  ~ ${GIT_STACK_TARGET} symlinked elsewhere — leaving alone`;
+  }
+  return `  ~ ${GIT_STACK_TARGET} is not a symlink — leaving alone`;
+}
+
 export async function uninstallSettings(homeDir: string = HOME): Promise<string> {
   const settingsFile = join(homeDir, ".claude", "settings.json");
   if (!(await pathExists(settingsFile))) return `  - ${settingsFile} doesn't exist`;
@@ -321,6 +367,9 @@ async function install(): Promise<void> {
   console.log("Slash commands:");
   for (const r of await installSymlinks()) console.log(r);
 
+  console.log("\ngit-stack CLI:");
+  for (const r of await installGitStack()) console.log(r);
+
   console.log("\nSettings:");
   console.log(await patchSettings());
 
@@ -330,17 +379,8 @@ async function install(): Promise<void> {
   console.log("\nHook state directory:");
   console.log(await createStateDir());
 
-  console.log("\n--- Next steps ---");
-  const hasGt = await commandOnPath("gt");
-  if (!hasGt) {
-    console.log("Graphite not installed. Run:");
-    console.log("  brew install withgraphite/tap/graphite");
-  } else {
-    console.log("Graphite (gt) is already installed.");
-  }
-  console.log("Then (interactive — you run these):");
-  console.log("  gt auth                                # once per machine");
-  console.log("  cd /path/to/your/repo && gt repo init  # once per repo");
+  console.log("\n--- Ready ---");
+  console.log("git stack is installed. Try: git stack help");
   console.log("");
   console.log("The hook fires on Edit/Write past 300 lines or 8 files of");
   console.log("uncommitted diff. Opt out of specific repos by adding their");
@@ -352,6 +392,9 @@ async function uninstall(): Promise<void> {
 
   console.log("Slash commands:");
   for (const r of await uninstallSymlinks()) console.log(r);
+
+  console.log("\ngit-stack CLI:");
+  console.log(await uninstallGitStack());
 
   console.log("\nSettings:");
   console.log(await uninstallSettings());

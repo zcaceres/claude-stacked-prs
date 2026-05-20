@@ -2,7 +2,7 @@
 
 Commit the current uncommitted work as the next branch in a stack, push it, and open a PR against the parent branch. Leave the user on the new child branch, ready to keep working.
 
-Uses Graphite (`gt`) when available, otherwise falls back to `gh` CLI + `git`.
+Uses `git stack` when available, otherwise falls back to `gh` CLI + `git`.
 
 **Usage:** `/checkpoint [slice description]`
 
@@ -30,11 +30,11 @@ Show the user the stat. Do **NOT** adjudicate coherence yourself. Only pause to 
 ### 3. Detect Stack Tooling
 
 ```bash
-which gt 2>/dev/null && test -f "$(git rev-parse --show-toplevel)/.graphite_repo_config" 2>/dev/null
+git stack --version 2>/dev/null
 ```
 
-If both succeed → **Graphite path** (step 4A).
-Otherwise → **`gh` fallback path** (step 4B).
+If this succeeds → **git-stack path** (step 6A).
+Otherwise → **`gh` fallback path** (step 6B).
 
 ### 4. Pre-flight: Check for Remote Drift
 
@@ -52,23 +52,23 @@ Stage explicitly — never `git add .` / `git add -A`:
 git add <file1> <file2> ...
 ```
 
-### 6A. Graphite Path — Create Branch + Submit
-
-```bash
-gt branch create -am "<commit message>"
-```
-
-`gt` slugifies the message into the branch name automatically. Pass `--name <slug>` only if `$ARGUMENTS` gave you a name hint that's different from the commit message.
+### 6A. git-stack Path — Create Branch + Submit
 
 If `$ARGUMENTS` is empty, generate a concise conventional-commit-style message from the diff (e.g. `feat: add user repository`, `fix: handle null token in middleware`).
+
+```bash
+git stack create -m "<commit message>"
+```
+
+This creates a new branch (auto-slugified from the message), records the parent relationship, and commits staged changes.
 
 Then submit the stack:
 
 ```bash
-gt stack submit
+git stack submit
 ```
 
-This pushes (force-with-lease internally) and creates/updates one GitHub PR per branch in the stack, with the correct base branches.
+This pushes (force-with-lease) and creates/updates one GitHub PR per branch in the stack, with the correct base branches.
 
 ### 6B. `gh` Fallback Path — Create Branch + PR
 
@@ -115,7 +115,7 @@ EOF
 ### 7. Report
 
 Report:
-- The new PR URL (parse from `gt stack submit` output, or `gh pr view --json url --jq .url`).
+- The new PR URL (`gh pr view --json url --jq .url`).
 - The new branch name (`git branch --show-current`).
 - A reminder: "You're on the child branch now. Keep working — the next `/checkpoint` will stack on top."
 
@@ -123,33 +123,18 @@ Report:
 
 - NEVER commit files you didn't modify in this conversation.
 - NEVER use `git add .` or stage unrelated changes.
-- NEVER auto-run `gt repo init` or `gt auth` — both are interactive and must come from the user.
-- **Graphite path:** If `gt stack submit` fails because the branch isn't tracked, run `gt branch track` then retry once before falling back to the `gh` path.
 - **`gh` path:** Always set `--base` to the parent branch, not `main`, to preserve the stack chain.
 - Report the PR URL when done.
 
 ## Merging a Stack (gh path)
 
-**Never squash-merge stacked PRs.** Squash-merging rewrites commit SHAs — child branches still reference the original commits, so Git treats them as unmerged. This causes child PRs to be auto-closed or stranded with stale bases.
+See the full merge guide in the **Stacked PRs** CLAUDE.md section. Summary of the three strategies:
 
-**Correct approach — regular merge, bottom-up:**
-
-```bash
-# Merge base PR (no --squash)
-gh pr merge <base-pr> --merge --delete-branch
-
-# Wait for GitHub to retarget the next PR
-# Verify before proceeding:
-gh pr view <next-pr> --json baseRefName --jq .baseRefName
-# Should show "main" (or the new base). If not, retarget manually:
-gh pr edit <next-pr> --base main
-
-# Then merge the next PR
-gh pr merge <next-pr> --merge --delete-branch
-# Repeat up the stack
-```
+- **`--merge` (recommended):** Preserves SHAs. Child branches just work. Use `--delete-branch` freely.
+- **`--rebase`:** Rewrites SHAs. Must rebase each child onto main before merging. **Never use `--delete-branch`** — it auto-closes child PRs and they can't be reopened.
+- **`--squash`:** Same problems as rebase. Avoid for stacks.
 
 **Key rules:**
-- Use `--merge`, not `--squash`, so child branches recognize their parent commits as merged.
-- Verify each child's base has retargeted before merging the next — GitHub retargeting is async.
-- Never tight-loop merges with `sleep` — poll `baseRefName` to confirm.
+- Merge bottom-up, one PR at a time.
+- Verify each child's `baseRefName` is `main` before merging the next.
+- With `--rebase`/`--squash`: retarget to main → `git rebase --onto origin/main <parent-commit> origin/<branch>` → force-push → merge. No `--delete-branch`.
