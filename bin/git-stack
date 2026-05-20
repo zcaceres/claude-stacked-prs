@@ -332,6 +332,30 @@ cmd_submit() {
   printf "\n${GREEN}✓${RESET} stack submitted (%d branches pushed)\n" $((stack_count - 1))
 }
 
+# --- Restack helper ---
+
+# Rebase a branch onto a new base, then recursively restack its children.
+# Args: <branch> <old_parent_tip> <new_base>
+restack_onto() {
+  local branch="$1" old_parent_tip="$2" new_base="$3"
+
+  local old_tip
+  old_tip=$(git rev-parse "$branch" 2>/dev/null) || die "failed to resolve tip of $branch"
+
+  info "restacking ${BOLD}$branch${RESET} onto ${new_base}..."
+  git checkout "$branch" 2>/dev/null || die "failed to checkout $branch"
+  git rebase --onto "$new_base" "$old_parent_tip" "$branch" 2>/dev/null || die "rebase conflict on $branch — resolve manually"
+  git push --force-with-lease origin "$branch" 2>/dev/null || die "failed to push rebased $branch"
+
+  # Recurse into children, using this branch's old tip as their rebase boundary
+  local children
+  children=$(find_children "$branch")
+  echo "$children" | while IFS= read -r child; do
+    [[ -z "$child" ]] && continue
+    restack_onto "$child" "$old_tip" "$branch"
+  done
+}
+
 # --- Retarget polling ---
 
 wait_for_retarget() {
@@ -506,12 +530,10 @@ cmd_merge() {
     if [[ -n "$child_branch" ]]; then
       set_stack_parent "$child_branch" "$trunk"
 
-      # For rebase/squash: child needs rebasing onto new trunk
+      # For rebase/squash: restack child and all its descendants
       if [[ "$strategy" != "merge" ]]; then
         git fetch origin "$trunk" 2>/dev/null
-        git checkout "$child_branch" 2>/dev/null || die "failed to checkout $child_branch"
-        git rebase --onto "origin/$trunk" "$parent_tip" "$child_branch" 2>/dev/null || die "rebase conflict on $child_branch — resolve manually"
-        git push --force-with-lease origin "$child_branch" 2>/dev/null || die "failed to push rebased $child_branch"
+        restack_onto "$child_branch" "$parent_tip" "origin/$trunk"
       fi
     fi
 
