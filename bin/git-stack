@@ -320,7 +320,7 @@ cmd_submit() {
 
       if [[ "$current_base" != "$parent" ]]; then
         info "retargeting #${pr_num} base: ${current_base} → ${parent}..."
-        gh pr edit "$pr_num" --base "$parent" 2>/dev/null || warn "failed to retarget PR #$pr_num"
+        gh pr edit "$pr_num" --base "$parent" 2>/dev/null || die "failed to retarget PR #$pr_num — stack is in an inconsistent state, fix manually with: gh pr edit $pr_num --base $parent"
       else
         info "#${pr_num} already targets ${parent} ✓"
       fi
