@@ -19,6 +19,7 @@ Lightweight stack management using `git` + `gh`. No third-party services or extr
 - `git stack log` — visualize the current stack with PR status
 - `git stack submit` — push all branches in the stack and create/update PRs on GitHub, each targeting its parent branch
 - `git stack merge [--all] [--rebase|--squash] [--dry-run]` — merge PRs bottom-up, handling retarget verification automatically
+- `git stack sync [--no-push]` — fetch trunk and rebase the entire stack onto the updated tip; use `--no-push` to rebase locally without force-pushing
 
 **How it works:** Parent relationships are stored in `git config branch.<name>.stack-parent`. The `gh-merge-base` config key is also set so `gh pr create` auto-picks the correct base.
 

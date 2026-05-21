@@ -57,6 +57,7 @@ git stack create [<name>] [-m "message"]    # Create a stacked branch
 git stack log                               # Visualize the current stack with PR status
 git stack submit                            # Push all branches + create/update PRs
 git stack merge [--all] [--rebase|--squash] [--dry-run]  # Merge PRs bottom-up
+git stack sync [--no-push]                  # Rebase stack onto updated trunk
 ```
 
 Parent relationships are stored in `git config branch.<name>.stack-parent`. No external services, no auth beyond `gh auth login`.
@@ -102,7 +103,8 @@ bun.lock:package-lock.json:pnpm-lock.yaml:yarn.lock:Cargo.lock:go.sum:Gemfile.lo
    - **With `git stack`:** `git stack create -m "..."` + `git stack submit` (pushes + opens the PR with the correct base branch).
    - **Without `git stack`:** `git checkout -b <branch>` + `git push` + `gh pr create --base <parent-branch>`.
 4. You're now on the fresh child branch. Keep working. Next checkpoint stacks again.
-5. When you're ready to merge: `git stack merge --all` merges the entire stack bottom-up, retargeting each child PR automatically.
+5. If trunk has advanced while you worked, `git stack sync` rebases the entire stack onto the updated trunk.
+6. When you're ready to merge: `git stack merge --all` merges the entire stack bottom-up, retargeting each child PR automatically.
 
 ## Uninstall
 
