@@ -4,7 +4,7 @@ Claude Code hooks, commands, and a lightweight stack manager that nudge Claude t
 
 ## What's in here
 
-- **`git stack`** (`bin/git-stack`) — lightweight stacked-PR manager built on `gh` + `git`. Creates branches, tracks parent relationships, pushes + opens PRs, and merges stacks bottom-up. No third-party services or extra auth.
+- **`git stack`** (`bin/git-stack`) — lightweight stacked-PR manager built on `gh` + `git`. Creates branches, tracks parent relationships, pushes + opens PRs, and merges stacks bottom-up. No third-party services or extra auth. Source lives at [`zcaceres/git-stack`](https://github.com/zcaceres/git-stack); `bin/git-stack` is a fetched release binary (see [Updating git-stack](#updating-git-stack)).
 - **PostToolUse hook** (`src/pr-size-nudge.ts`) — nudges Claude toward `/checkpoint` when the uncommitted diff in the current repo grows past a threshold.
 - **`/checkpoint` slash command** (`commands/checkpoint.md`) — ships the current slice as a stacked PR and leaves you on a fresh child branch ready to keep working. Uses `git stack` when available, otherwise falls back to `gh` CLI + `git`.
 - **`/commit-push-pr` slash command** (`commands/commit-push-pr.md`) — commit, push, and open a PR. Stack-aware: uses `git stack submit` on stacked branches, otherwise falls back to `gh pr create` (preserves base branch).
@@ -41,6 +41,14 @@ The installer:
 6. Creates `~/.claude/state/` for the hook's dedup state.
 
 Existing files are backed up as `.bak.<timestamp>` before being overwritten.
+
+### Updating git-stack
+
+`bin/git-stack` is fetched from the [`zcaceres/git-stack`](https://github.com/zcaceres/git-stack) release artifacts. To pull the latest:
+
+```bash
+bun run update:git-stack
+```
 
 ## `git stack` commands
 
@@ -109,7 +117,7 @@ Removes symlinks, restores `~/.claude/settings.json` and `~/.claude/CLAUDE.md` f
 ```
 ~/claude-stacked-prs/
 ├── bin/
-│   └── git-stack                    # git stack CLI (pure bash)
+│   └── git-stack                    # git stack CLI (fetched release binary)
 ├── src/
 │   └── pr-size-nudge.ts             # PostToolUse hook
 ├── commands/
