@@ -1,0 +1,24 @@
+name: check git-stack version
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 12 * * 1'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare bundled version to latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BUNDLED=$(grep '^VERSION=' bin/git-stack | head -1 | cut -d'"' -f2)
+          LATEST=$(gh release view --repo zcaceres/git-stack --json tagName -q '.tagName' | sed 's/^v//')
+          echo "Bundled: $BUNDLED"
+          echo "Latest:  $LATEST"
+          if [ "$BUNDLED" != "$LATEST" ]; then
+            echo "::warning::Bundled git-stack ($BUNDLED) is behind latest release ($LATEST). Run: bun run update:git-stack"
+          fi

@@ -9,16 +9,13 @@
     "uninstall:user": "bun run install.ts --uninstall",
     "hook": "bun run src/pr-size-nudge.ts",
     "test": "bun test",
-    "test:bash": "bats test/"
+    "update:git-stack": "curl -fsSL https://github.com/zcaceres/git-stack/releases/latest/download/git-stack -o bin/git-stack && chmod +x bin/git-stack"
   },
   "dependencies": {
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "bats": "^1.13.0",
-    "bats-assert": "^2.2.4",
-    "bats-support": "^0.3.0",
     "typescript": "^5.5.0"
   }
 }
