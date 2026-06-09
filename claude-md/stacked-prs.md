@@ -92,7 +92,7 @@ gh pr merge <PR> --rebase
 git fetch origin main
 ```
 
-**Finding `<parent-commit>`:** Each stacked branch has N ancestor commits + 1 unique commit. The parent commit is `origin/<branch>~1` when the PR has a single commit (the common case with `/checkpoint`). For multi-commit PRs, it's the last commit that belongs to the parent PR.
+**Finding `<parent-commit>`:** Each stacked branch has N ancestor commits + 1 unique commit. The parent commit is `origin/<branch>~1` when the PR has a single commit (the common case with `/stacked-pr checkpoint`). For multi-commit PRs, it's the last commit that belongs to the parent PR.
 
 **Tip:** Before starting, map the stack: for each branch, record its tip SHA and its parent SHA. These are the original SHAs before any rebasing — use them throughout.
 
@@ -134,7 +134,7 @@ done
 
 - Default to small, focused PRs stacked on each other rather than one large PR.
 - When starting non-trivial work, propose the stack upfront: list the 2–5 slices you plan to ship and confirm before implementing.
-- At each logical seam, run `/checkpoint` to ship the current slice as a stacked PR and continue on a fresh child branch.
+- At each logical seam, run `/stacked-pr checkpoint` to ship the current slice as a stacked PR and continue on a fresh child branch.
 - The PostToolUse hook will nudge when an uncommitted diff grows past ~300 lines / 8 files — treat that as a prompt to reflect, not a hard rule.
 - Use `git stack` when available. Otherwise use `gh` CLI + `git` for stack management. Standard GitHub PRs are the review surface — reviewers need nothing installed.
 - When merging a stack, merge bottom-up and verify each child PR's base retargeted before merging the next.
