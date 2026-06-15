@@ -1,5 +1,10 @@
 # claude-stacked-prs — archived
 
+> [!IMPORTANT]
+> **Moved to the skills collection:** [`zcaceres/skills`](https://github.com/zcaceres/skills)
+>
+> New home: [`skills/stacked-pr`](https://github.com/zcaceres/skills/tree/main/skills/stacked-pr)
+
 > **This repo is archived.** The hooks, slash commands, and stacked-PR
 > workflow have moved into [`zcaceres/skills`](https://github.com/zcaceres/skills)
 > as a single bundled skill.
